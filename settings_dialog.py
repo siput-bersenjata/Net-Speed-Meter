@@ -1,0 +1,461 @@
+import sys
+import webbrowser
+from PySide6.QtCore import Qt, Signal, QUrl
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, QLabel,
+    QComboBox, QCheckBox, QSlider, QPushButton, QGroupBox, QColorDialog,
+    QMessageBox
+)
+
+import styles
+from config_manager import ConfigManager
+from network_monitor import NetworkMonitor
+from win_utils import (
+    get_tray_wifi_dock_coordinate,
+    set_windows_autostart,
+    is_windows_autostart_enabled
+)
+
+
+class SettingsDialog(QDialog):
+    """
+    Modern Windows 11 Fluent Settings Dialog.
+    Allows user to customize widget mode, scale, colors, hold-to-drag, network adapter, refresh rate, and autostart.
+    """
+    settings_changed = Signal()
+    snap_requested = Signal()
+    dock_taskbar_requested = Signal(bool)
+
+    def __init__(self, config_manager: ConfigManager = None, parent=None):
+        super().__init__(parent)
+        self.config = config_manager or ConfigManager()
+
+        self.setWindowTitle("Pengaturan — Modern Speed Meter")
+        self.setFixedSize(560, 530)
+        self.setStyleSheet(styles.get_settings_dialog_style())
+
+        self._setup_ui()
+        self._load_values()
+
+    def _setup_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(18, 18, 18, 18)
+        main_layout.setSpacing(14)
+
+        # Tab Widget
+        self.tabs = QTabWidget(self)
+        self.tabs.addTab(self._build_general_tab(), "Umum")
+        self.tabs.addTab(self._build_appearance_tab(), "Tampilan & Ukuran")
+        self.tabs.addTab(self._build_network_tab(), "Jaringan")
+        self.tabs.addTab(self._build_startup_tab(), "Startup & Info Dev")
+        main_layout.addWidget(self.tabs)
+
+        # Footer Action Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
+
+        self.btn_reset = QPushButton("Reset Default", self)
+        self.btn_reset.clicked.connect(self._reset_defaults)
+        btn_layout.addWidget(self.btn_reset)
+
+        btn_layout.addStretch()
+
+        self.btn_cancel = QPushButton("Batal", self)
+        self.btn_cancel.clicked.connect(self.reject)
+        btn_layout.addWidget(self.btn_cancel)
+
+        self.btn_apply = QPushButton("Terapkan & Simpan", self)
+        self.btn_apply.setObjectName("PrimaryButton")
+        self.btn_apply.clicked.connect(self._save_and_apply)
+        btn_layout.addWidget(self.btn_apply)
+
+        main_layout.addLayout(btn_layout)
+
+    def _build_general_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(14)
+
+        # Mode Selection
+        grp_mode = QGroupBox("Gaya Tampilan Widget (Layout Mode)", tab)
+        v_mode = QVBoxLayout(grp_mode)
+        self.combo_mode = QComboBox(grp_mode)
+        self.combo_mode.addItem("Capsule Pill (Kapsul Modern Melayang)", "capsule")
+        self.combo_mode.addItem("Taskbar Docked (Menyatu di Taskbar Samping Wi-Fi)", "taskbar")
+        self.combo_mode.addItem("Floating Glass Card (Kartu Detail + Grafik)", "card")
+        v_mode.addWidget(self.combo_mode)
+
+        lbl_mode_hint = QLabel("Pilih 'Taskbar Docked' untuk memasukkan widget langsung ke dalam bilah taskbar Windows di samping ikon Wi-Fi & Baterai.", grp_mode)
+        lbl_mode_hint.setWordWrap(True)
+        lbl_mode_hint.setStyleSheet("color: #94A3B8; font-size: 8.5pt; margin-top: 4px;")
+        v_mode.addWidget(lbl_mode_hint)
+        layout.addWidget(grp_mode)
+
+        # Behavior Group
+        grp_behav = QGroupBox("Perilaku Jendela & Posisi Taskbar", tab)
+        v_behav = QVBoxLayout(grp_behav)
+        self.chk_ontop = QCheckBox("Selalu di Atas (Always on Top)", grp_behav)
+        self.chk_locked = QCheckBox("Kunci Posisi Sepenuhnya (Disable Drag)", grp_behav)
+        self.chk_hold_to_drag = QCheckBox("Wajib Tekan Tahan 2 Detik untuk Menggeser", grp_behav)
+        
+        lbl_drag_hint = QLabel("Mencegah geser tak sengaja: klik biasa tidak akan memindahkan widget agar tidak menutupi tombol/file di baliknya.", grp_behav)
+        lbl_drag_hint.setWordWrap(True)
+        lbl_drag_hint.setStyleSheet("color: #94A3B8; font-size: 8.5pt; margin-left: 24px; margin-bottom: 6px;")
+
+        self.chk_click_through = QCheckBox("Mode Tembus Klik Mouse (Click-Through / Bisa Klik Tombol di Belakang)", grp_behav)
+        lbl_click_hint = QLabel(
+            "Ketika aktif, klik mouse langsung menembus ke tombol di baliknya (ikon tray, bilah taskbar, Wi-Fi, Audio). "
+            "Untuk membuka menu atau mematikan, klik kanan pada ikon di System Tray (dekat jam).",
+            grp_behav
+        )
+        lbl_click_hint.setWordWrap(True)
+        lbl_click_hint.setStyleSheet("color: #38BDF8; font-size: 8.5pt; margin-left: 24px; margin-bottom: 6px;")
+
+        # Quick Actions Row
+        row_quick = QHBoxLayout()
+        row_quick.setSpacing(8)
+
+        self.btn_dock_taskbar = QPushButton("📌 Masuk ke Dalam Taskbar", grp_behav)
+        self.btn_dock_taskbar.setObjectName("PrimaryButton")
+        self.btn_dock_taskbar.clicked.connect(self._dock_now)
+
+        self.btn_snap_now = QPushButton("⚡ Snap Samping Wi-Fi", grp_behav)
+        self.btn_snap_now.clicked.connect(lambda: self.snap_requested.emit())
+
+        row_quick.addWidget(self.btn_dock_taskbar)
+        row_quick.addWidget(self.btn_snap_now)
+
+        v_behav.addWidget(self.chk_ontop)
+        v_behav.addWidget(self.chk_locked)
+        v_behav.addWidget(self.chk_hold_to_drag)
+        v_behav.addWidget(lbl_drag_hint)
+        v_behav.addWidget(self.chk_click_through)
+        v_behav.addWidget(lbl_click_hint)
+        v_behav.addLayout(row_quick)
+        layout.addWidget(grp_behav)
+
+        layout.addStretch()
+        return tab
+
+    def _build_network_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(14)
+
+        grp_nic = QGroupBox("Kartu Jaringan (Network Adapter)", tab)
+        v_nic = QVBoxLayout(grp_nic)
+        self.combo_nic = QComboBox(grp_nic)
+        for nic in NetworkMonitor.get_available_nics():
+            label = "Otomatis Deteksi Semua Jaringan" if nic == "auto" else nic
+            self.combo_nic.addItem(label, nic)
+        v_nic.addWidget(self.combo_nic)
+        layout.addWidget(grp_nic)
+
+        grp_rate = QGroupBox("Frekuensi Pembaruan (Refresh Rate)", tab)
+        v_rate = QVBoxLayout(grp_rate)
+        self.combo_interval = QComboBox(grp_rate)
+        self.combo_interval.addItem("500 ms (Sangat Cepat)", 500)
+        self.combo_interval.addItem("1000 ms / 1 detik (Standar Direkomendasikan)", 1000)
+        self.combo_interval.addItem("2000 ms / 2 detik (Hemat Daya)", 2000)
+        v_rate.addWidget(self.combo_interval)
+        layout.addWidget(grp_rate)
+
+        layout.addStretch()
+        return tab
+
+    def _build_appearance_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(14)
+
+        # Shape Template Group
+        grp_shape = QGroupBox("Template Bentuk & Sudut (Shape Template)", tab)
+        v_shape = QVBoxLayout(grp_shape)
+        self.combo_shape = QComboBox(grp_shape)
+        self.combo_shape.addItem("💊 Kapsul Bulat Penuh (Pill — Bulat Sempurna, Tidak Mengkotak)", "pill")
+        self.combo_shape.addItem("🔘 Badge Melengkung (Curved Oval Badge)", "badge")
+        self.combo_shape.addItem("🫧 Melengkung Modern (Soft Rounded 12px)", "rounded")
+        self.combo_shape.addItem("✨ Hanya Tulisan (Clean Text Only — Tanpa Kotak Background)", "text_only")
+        v_shape.addWidget(self.combo_shape)
+
+        lbl_shape_hint = QLabel(
+            "Pilih 'Kapsul Bulat Penuh' untuk tampilan bulat halus anti-mengkotak, "
+            "atau 'Hanya Tulisan' agar hanya angka kecepatan internet yang muncul tanpa background kotak.",
+            grp_shape
+        )
+        lbl_shape_hint.setWordWrap(True)
+        lbl_shape_hint.setStyleSheet("color: #94A3B8; font-size: 8.5pt; margin-top: 4px;")
+        v_shape.addWidget(lbl_shape_hint)
+        layout.addWidget(grp_shape)
+
+        # Colors Group
+        grp_colors = QGroupBox("Warna Aksen Indikator (Colors)", tab)
+        v_colors = QVBoxLayout(grp_colors)
+
+        row_up = QHBoxLayout()
+        row_up.addWidget(QLabel("Warna Upload (▲):", grp_colors))
+        self.btn_up_color = QPushButton("■ Pilih Warna", grp_colors)
+        self.btn_up_color.clicked.connect(self._pick_up_color)
+        row_up.addWidget(self.btn_up_color)
+        v_colors.addLayout(row_up)
+
+        row_down = QHBoxLayout()
+        row_down.addWidget(QLabel("Warna Download (▼):", grp_colors))
+        self.btn_down_color = QPushButton("■ Pilih Warna", grp_colors)
+        self.btn_down_color.clicked.connect(self._pick_down_color)
+        row_down.addWidget(self.btn_down_color)
+        v_colors.addLayout(row_down)
+
+        layout.addWidget(grp_colors)
+
+        # Scale / Size Group
+        grp_scale = QGroupBox("Ukuran Tampilan Widget (Widget Scale & Size)", tab)
+        v_scale = QVBoxLayout(grp_scale)
+        self.slider_scale = QSlider(Qt.Orientation.Horizontal, grp_scale)
+        self.slider_scale.setRange(65, 150)
+        self.slider_scale.setSingleStep(5)
+        self.slider_scale.setValue(100)
+        self.lbl_scale_val = QLabel("100% (Standar)", grp_scale)
+
+        def _update_scale_label(val):
+            status = "Kecil" if val < 85 else ("Standar" if val <= 110 else "Besar")
+            self.lbl_scale_val.setText(f"{val}% ({status})")
+
+        self.slider_scale.valueChanged.connect(_update_scale_label)
+
+        row_scale = QHBoxLayout()
+        row_scale.addWidget(self.slider_scale)
+        row_scale.addWidget(self.lbl_scale_val)
+        v_scale.addLayout(row_scale)
+
+        lbl_scale_hint = QLabel("💡 Tips: Anda juga bisa menahan tombol Ctrl sambil memutar Scroll Mouse pada widget untuk mengubah ukuran langsung di layar.", grp_scale)
+        lbl_scale_hint.setWordWrap(True)
+        lbl_scale_hint.setStyleSheet("color: #94A3B8; font-size: 8.5pt;")
+        v_scale.addWidget(lbl_scale_hint)
+
+        layout.addWidget(grp_scale)
+
+        # Opacity & Font Group
+        grp_opacity = QGroupBox("Transparansi Latar Kaca (Opacity — Bisa sampai 0%)", tab)
+        v_opacity = QVBoxLayout(grp_opacity)
+        self.slider_opacity = QSlider(Qt.Orientation.Horizontal, grp_opacity)
+        self.slider_opacity.setRange(0, 100)
+        self.slider_opacity.setValue(92)
+        self.lbl_opacity_val = QLabel("92%", grp_opacity)
+
+        def _update_opacity_label(v):
+            if v == 0:
+                self.lbl_opacity_val.setText("0% (Transparan Penuh / Hanya Tulisan)")
+            elif v < 30:
+                self.lbl_opacity_val.setText(f"{v}% (Sangat Bening)")
+            elif v < 80:
+                self.lbl_opacity_val.setText(f"{v}% (Kaca Transparan)")
+            else:
+                self.lbl_opacity_val.setText(f"{v}% (Pekat)")
+
+        self._update_opacity_label = _update_opacity_label
+        self.slider_opacity.valueChanged.connect(_update_opacity_label)
+
+        row_slider = QHBoxLayout()
+        row_slider.addWidget(self.slider_opacity)
+        row_slider.addWidget(self.lbl_opacity_val)
+        v_opacity.addLayout(row_slider)
+
+        lbl_opacity_hint = QLabel("💡 Geser ke 0% jika ingin latar belakang dan garis kotak hilang sepenuhnya (hanya menyisakan tulisan kecepatan).", grp_opacity)
+        lbl_opacity_hint.setWordWrap(True)
+        lbl_opacity_hint.setStyleSheet("color: #94A3B8; font-size: 8.5pt;")
+        v_opacity.addWidget(lbl_opacity_hint)
+
+        layout.addWidget(grp_opacity)
+
+        layout.addStretch()
+        return tab
+
+    def _build_startup_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(14)
+
+        # Autostart Group
+        grp_boot = QGroupBox("Integrasi Windows Startup (Auto-Run)", tab)
+        v_boot = QVBoxLayout(grp_boot)
+        self.chk_startup = QCheckBox("Jalankan otomatis saat Windows dinyalakan (Auto Start)", grp_boot)
+        lbl_hint = QLabel("Widget akan otomatis aktif di system tray dan menempati posisi terakhir Anda setiap kali PC/laptop menyala.", grp_boot)
+        lbl_hint.setWordWrap(True)
+        lbl_hint.setStyleSheet("color: #94A3B8; font-size: 8.5pt;")
+
+        v_boot.addWidget(self.chk_startup)
+        v_boot.addWidget(lbl_hint)
+        layout.addWidget(grp_boot)
+
+        # Dev / Support Group
+        grp_dev = QGroupBox("Pengembang & Layanan Resmi (Salshya Club)", tab)
+        v_dev = QVBoxLayout(grp_dev)
+        
+        lbl_dev_desc = QLabel("Salshya_Club | Pusat Software Premium, Produk Digital & Layanan Sosmed", grp_dev)
+        lbl_dev_desc.setWordWrap(True)
+        lbl_dev_desc.setStyleSheet("color: #E2E8F0; font-weight: 600; font-size: 9.5pt;")
+        
+        lbl_dev_sub = QLabel("Punya masukan, saran fitur, atau butuh software custom lainnya? Kunjungi situs resmi kami.", grp_dev)
+        lbl_dev_sub.setWordWrap(True)
+        lbl_dev_sub.setStyleSheet("color: #94A3B8; font-size: 8.5pt;")
+
+        self.btn_dev = QPushButton("🌐 Hubungi Dev (Salshya Club) ↗", grp_dev)
+        self.btn_dev.setObjectName("DevButton")
+        self.btn_dev.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        def _open_dev_link():
+            url = "https://salshya-club.vercel.app/"
+            try:
+                QDesktopServices.openUrl(QUrl(url))
+            except Exception:
+                webbrowser.open(url)
+
+        self.btn_dev.clicked.connect(_open_dev_link)
+
+        v_dev.addWidget(lbl_dev_desc)
+        v_dev.addWidget(lbl_dev_sub)
+        v_dev.addSpacing(6)
+        v_dev.addWidget(self.btn_dev)
+        layout.addWidget(grp_dev)
+
+        layout.addStretch()
+        return tab
+
+    def _load_values(self):
+        # Mode
+        mode = self.config.get("widget_mode", "capsule")
+        idx = self.combo_mode.findData(mode)
+        if idx >= 0:
+            self.combo_mode.setCurrentIndex(idx)
+
+        # Shape template
+        cur_shape = self.config.get("shape_template", "pill")
+        s_idx = self.combo_shape.findData(cur_shape)
+        if s_idx >= 0:
+            self.combo_shape.setCurrentIndex(s_idx)
+
+        # Always on top, Lock, Hold to drag, Click-through
+        self.chk_ontop.setChecked(self.config.get("always_on_top", True))
+        self.chk_locked.setChecked(self.config.get("locked_position", False))
+        self.chk_hold_to_drag.setChecked(self.config.get("hold_to_drag", True))
+        self.chk_click_through.setChecked(self.config.get("click_through", False))
+
+        # Scale
+        cur_scale = int(round(float(self.config.get("widget_scale", 1.0)) * 100))
+        self.slider_scale.setValue(cur_scale)
+        status = "Kecil" if cur_scale < 85 else ("Standar" if cur_scale <= 110 else "Besar")
+        self.lbl_scale_val.setText(f"{cur_scale}% ({status})")
+
+        # NIC
+        nic = self.config.get("nic_name", "auto")
+        nic_idx = self.combo_nic.findData(nic)
+        if nic_idx >= 0:
+            self.combo_nic.setCurrentIndex(nic_idx)
+
+        # Interval
+        interval = self.config.get("refresh_interval_ms", 1000)
+        int_idx = self.combo_interval.findData(interval)
+        if int_idx >= 0:
+            self.combo_interval.setCurrentIndex(int_idx)
+
+        # Colors
+        self.up_color = self.config.get("up_color", "#00E676")
+        self.down_color = self.config.get("down_color", "#00E5FF")
+        self._update_color_button_styles()
+
+        # Opacity
+        op = int(round(float(self.config.get("opacity", 0.92)) * 100))
+        self.slider_opacity.setValue(op)
+        if hasattr(self, "_update_opacity_label"):
+            self._update_opacity_label(op)
+        else:
+            self.lbl_opacity_val.setText(f"{op}%")
+
+        # Startup
+        is_startup = is_windows_autostart_enabled("ModernSpeedMeter")
+        self.chk_startup.setChecked(is_startup)
+
+    def _update_color_button_styles(self):
+        self.btn_up_color.setStyleSheet(f"background-color: {self.up_color}; color: #000; font-weight: bold; border-radius: 6px; padding: 6px;")
+        self.btn_down_color.setStyleSheet(f"background-color: {self.down_color}; color: #000; font-weight: bold; border-radius: 6px; padding: 6px;")
+
+    def _pick_up_color(self):
+        col = QColorDialog.getColor(self.up_color, self, "Pilih Warna Indikator Upload")
+        if col.isValid():
+            self.up_color = col.name()
+            self._update_color_button_styles()
+
+    def _pick_down_color(self):
+        col = QColorDialog.getColor(self.down_color, self, "Pilih Warna Indikator Download")
+        if col.isValid():
+            self.down_color = col.name()
+            self._update_color_button_styles()
+
+    def _reset_defaults(self):
+        reply = QMessageBox.question(
+            self, "Konfirmasi Reset",
+            "Apakah Anda yakin ingin mengembalikan semua pengaturan ke default?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.combo_mode.setCurrentIndex(self.combo_mode.findData("capsule"))
+            self.combo_shape.setCurrentIndex(self.combo_shape.findData("pill"))
+            self.chk_ontop.setChecked(True)
+            self.chk_locked.setChecked(False)
+            self.chk_hold_to_drag.setChecked(True)
+            self.chk_click_through.setChecked(False)
+            self.slider_scale.setValue(100)
+            self.lbl_scale_val.setText("100% (Standar)")
+            self.combo_nic.setCurrentIndex(0)
+            self.combo_interval.setCurrentIndex(1)
+            self.up_color = "#00E676"
+            self.down_color = "#00E5FF"
+            self._update_color_button_styles()
+            self.slider_opacity.setValue(92)
+            if hasattr(self, "_update_opacity_label"):
+                self._update_opacity_label(92)
+            else:
+                self.lbl_opacity_val.setText("92%")
+            self.chk_startup.setChecked(True)
+
+    def _dock_now(self):
+        """Immediately switches to taskbar mode, docks into Windows taskbar, and closes dialog."""
+        idx = self.combo_mode.findData("taskbar")
+        if idx >= 0:
+            self.combo_mode.setCurrentIndex(idx)
+        self.config.set("widget_mode", "taskbar", auto_save=False)
+        self.config.set("is_taskbar_docked", True, auto_save=False)
+        self.config.set("always_on_top", True, auto_save=False)
+        self.config.save()
+        self.dock_taskbar_requested.emit(True)
+        self.settings_changed.emit()
+        self.accept()
+
+    def _save_and_apply(self):
+        mode = self.combo_mode.currentData()
+        self.config.set("widget_mode", mode, auto_save=False)
+        self.config.set("shape_template", self.combo_shape.currentData(), auto_save=False)
+        if mode == "taskbar":
+            self.config.set("is_taskbar_docked", True, auto_save=False)
+        self.config.set("always_on_top", self.chk_ontop.isChecked(), auto_save=False)
+        self.config.set("locked_position", self.chk_locked.isChecked(), auto_save=False)
+        self.config.set("hold_to_drag", self.chk_hold_to_drag.isChecked(), auto_save=False)
+        self.config.set("click_through", self.chk_click_through.isChecked(), auto_save=False)
+        self.config.set("widget_scale", round(self.slider_scale.value() / 100.0, 2), auto_save=False)
+        self.config.set("nic_name", self.combo_nic.currentData(), auto_save=False)
+        self.config.set("refresh_interval_ms", self.combo_interval.currentData(), auto_save=False)
+        self.config.set("up_color", self.up_color, auto_save=False)
+        self.config.set("down_color", self.down_color, auto_save=False)
+        self.config.set("opacity", round(self.slider_opacity.value() / 100.0, 2), auto_save=False)
+        self.config.set("autostart", self.chk_startup.isChecked(), auto_save=False)
+
+        # Autostart
+        set_windows_autostart("ModernSpeedMeter", enable=self.chk_startup.isChecked())
+
+        self.config.save()
+        if mode == "taskbar":
+            self.dock_taskbar_requested.emit(True)
+        self.settings_changed.emit()
+        self.accept()
