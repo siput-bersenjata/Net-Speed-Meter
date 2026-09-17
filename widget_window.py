@@ -304,11 +304,16 @@ class SpeedMeterWidget(QWidget):
 
         # Mini Sparkline
         spark_h = max(14, int(round(22 * scale)))
+        old_history = list(self.sparkline.history) if hasattr(self, "sparkline") and self.sparkline else None
         self.sparkline = SparklineWidget(height=spark_h, parent=self.central_container)
+        if old_history:
+            self.sparkline.history = deque(old_history, maxlen=self.sparkline.max_points)
         card_layout.addWidget(self.sparkline)
 
         # Footer: Total Session Usage
-        self.session_label = QLabel("Session: ▲ 0 B  ▼ 0 B", self.central_container)
+        s_up = NetworkMonitor.format_bytes(self.current_total_sent)
+        s_down = NetworkMonitor.format_bytes(self.current_total_recv)
+        self.session_label = QLabel(f"Session: ▲ {s_up}  ▼ {s_down}", self.central_container)
         self.session_label.setObjectName("SessionTotal")
         card_layout.addWidget(self.session_label)
 
@@ -370,9 +375,11 @@ class SpeedMeterWidget(QWidget):
     def set_mode(self, mode: str):
         if mode not in ["capsule", "taskbar", "card"]:
             mode = "capsule"
+        mode_changed = (self.mode != mode)
         self.mode = mode
         self.config.set("widget_mode", mode)
-        self._setup_ui()
+        if mode_changed:
+            self._setup_ui()
         self.apply_theme()
         self.update_stats(self.current_up, self.current_down, self.current_total_sent, self.current_total_recv, self.current_ping)
         if mode == "taskbar" and self.config.get("is_taskbar_docked", False):

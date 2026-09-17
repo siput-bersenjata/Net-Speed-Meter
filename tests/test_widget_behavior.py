@@ -52,5 +52,21 @@ class TestWidgetBehavior(unittest.TestCase):
         self.assertIn("background-color: transparent;", widget.styleSheet())
         self.assertIn("border: none;", widget.styleSheet())
 
+    def test_session_preservation_on_mode_change(self):
+        widget = SpeedMeterWidget(config_manager=self.config)
+        widget.update_stats(100.0, 200.0, 1024 * 1024 * 9.8, 1024 * 326.3, 27)
+        self.assertEqual(widget.current_total_sent, 1024 * 1024 * 9.8)
+
+        # Switch to card mode
+        widget.set_mode("card")
+        self.assertTrue(hasattr(widget, "session_label"))
+        self.assertIn("9.8 MB", widget.session_label.text())
+        self.assertIn("326.3 KB", widget.session_label.text())
+
+        # Simulate applying settings again without mode change
+        widget.set_mode("card")
+        self.assertIn("9.8 MB", widget.session_label.text())
+        self.assertIn("326.3 KB", widget.session_label.text())
+
 if __name__ == "__main__":
     unittest.main()

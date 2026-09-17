@@ -22,8 +22,8 @@ class NetworkMonitor(QThread):
         self.last_sent = 0
         self.last_recv = 0
         self.last_time = time.time()
-        self.session_sent_start = 0
-        self.session_recv_start = 0
+        self.session_sent_bytes = 0.0
+        self.session_recv_bytes = 0.0
         self._init_counters()
 
     def _init_counters(self):
@@ -31,8 +31,19 @@ class NetworkMonitor(QThread):
         self.last_sent = sent
         self.last_recv = recv
         self.last_time = time.time()
-        self.session_sent_start = sent
-        self.session_recv_start = recv
+
+    def reset_session(self):
+        """Explicitly resets session traffic counters if requested."""
+        self.session_sent_bytes = 0.0
+        self.session_recv_bytes = 0.0
+
+    @property
+    def session_sent_start(self) -> float:
+        return 0.0
+
+    @property
+    def session_recv_start(self) -> float:
+        return 0.0
 
     @staticmethod
     def get_available_nics() -> List[str]:
@@ -48,6 +59,8 @@ class NetworkMonitor(QThread):
         self.interval_sec = max(0.2, ms / 1000.0)
 
     def set_nic(self, name: str):
+        if name == self.nic_name:
+            return
         self.nic_name = name
         self._init_counters()
 
@@ -101,8 +114,8 @@ class NetworkMonitor(QThread):
                 self.last_recv = recv
                 self.last_time = now
 
-                session_sent = max(0.0, float(sent - self.session_sent_start))
-                session_recv = max(0.0, float(recv - self.session_recv_start))
+                self.session_sent_bytes += float(delta_sent)
+                self.session_recv_bytes += float(delta_recv)
 
                 # Sample ping every 4 cycles to keep network overhead minimal
                 ping_counter += 1
@@ -111,7 +124,7 @@ class NetworkMonitor(QThread):
                     current_ping = self._measure_ping()
 
                 if self.running:
-                    self.stats_updated.emit(up_rate, down_rate, session_sent, session_recv, current_ping)
+                    self.stats_updated.emit(up_rate, down_rate, self.session_sent_bytes, self.session_recv_bytes, current_ping)
                     if delta_sent > 0 or delta_recv > 0:
                         self.traffic_delta.emit(int(delta_sent), int(delta_recv))
             except Exception:
