@@ -11,6 +11,8 @@ class NetworkMonitor(QThread):
     """
     # upload_bps, download_bps, session_sent_bytes, session_recv_bytes, ping_ms
     stats_updated = Signal(float, float, float, float, int)
+    # delta_sent_bytes, delta_recv_bytes
+    traffic_delta = Signal(int, int)
 
     def __init__(self, interval_ms: int = 1000, nic_name: str = "auto", parent=None):
         super().__init__(parent)
@@ -89,8 +91,11 @@ class NetworkMonitor(QThread):
                     elapsed = 1.0
 
                 sent, recv = self._get_raw_counters()
-                up_rate = max(0.0, (sent - self.last_sent) / elapsed)
-                down_rate = max(0.0, (recv - self.last_recv) / elapsed)
+                delta_sent = max(0, sent - self.last_sent)
+                delta_recv = max(0, recv - self.last_recv)
+
+                up_rate = max(0.0, delta_sent / elapsed)
+                down_rate = max(0.0, delta_recv / elapsed)
 
                 self.last_sent = sent
                 self.last_recv = recv
@@ -107,6 +112,8 @@ class NetworkMonitor(QThread):
 
                 if self.running:
                     self.stats_updated.emit(up_rate, down_rate, session_sent, session_recv, current_ping)
+                    if delta_sent > 0 or delta_recv > 0:
+                        self.traffic_delta.emit(int(delta_sent), int(delta_recv))
             except Exception:
                 pass
 

@@ -48,6 +48,7 @@ from PySide6.QtWidgets import QApplication
 
 from config_manager import ConfigManager
 from network_monitor import NetworkMonitor
+from traffic_history import TrafficHistory
 from widget_window import SpeedMeterWidget
 from tray_manager import TrayManager
 from settings_dialog import SettingsDialog
@@ -131,6 +132,9 @@ def main():
     # 1. Initialize Configuration
     config = ConfigManager()
 
+    # 1.1 Initialize Traffic History Persistence Manager
+    history = TrafficHistory()
+
     # 2. Initialize Floating Widget Window
     widget = SpeedMeterWidget(config_manager=config)
 
@@ -155,6 +159,12 @@ def main():
             pass
 
     monitor.stats_updated.connect(on_stats_updated)
+    monitor.traffic_delta.connect(history.record_delta)
+
+    # Periodic Traffic History DB Flush (every 30 seconds)
+    flush_timer = QTimer(app)
+    flush_timer.timeout.connect(history.flush)
+    flush_timer.start(30000)
 
     # Wire Tray & Widget Actions
     def toggle_widget():
@@ -181,7 +191,7 @@ def main():
     def open_settings():
         nonlocal settings_dialog
         if settings_dialog is None:
-            settings_dialog = SettingsDialog(config_manager=config, parent=None)
+            settings_dialog = SettingsDialog(config_manager=config, traffic_history=history, parent=None)
             settings_dialog.dock_taskbar_requested.connect(widget.dock_to_taskbar)
             settings_dialog.snap_requested.connect(widget.snap_to_taskbar)
 
@@ -246,13 +256,24 @@ def main():
     # Clean Exit handler
     def exit_application():
         log_step("[exit_application] Clean exit requested.")
+        try:
+            history.flush()
+        except Exception:
+            pass
         monitor.stop()
         tray.tray_icon.hide()
         if settings_dialog:
             settings_dialog.close()
         app.quit()
 
-    app.aboutToQuit.connect(lambda: log_step("[app] aboutToQuit signal fired!"))
+    def on_about_to_quit():
+        log_step("[app] aboutToQuit signal fired!")
+        try:
+            history.flush()
+        except Exception:
+            pass
+
+    app.aboutToQuit.connect(on_about_to_quit)
     widget.exit_requested.connect(exit_application)
     tray.exit_requested.connect(exit_application)
 

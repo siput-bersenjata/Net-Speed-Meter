@@ -1,16 +1,18 @@
 import sys
 import webbrowser
 from PySide6.QtCore import Qt, Signal, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QColor
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, QLabel,
     QComboBox, QCheckBox, QSlider, QPushButton, QGroupBox, QColorDialog,
-    QMessageBox
+    QMessageBox, QTableWidget, QTableWidgetItem, QHeaderView, QFrame
 )
 
 import styles
 from config_manager import ConfigManager
 from network_monitor import NetworkMonitor
+from traffic_history import TrafficHistory
+from traffic_chart import TrafficChartWidget
 from win_utils import (
     get_tray_wifi_dock_coordinate,
     set_windows_autostart,
@@ -22,17 +24,20 @@ class SettingsDialog(QDialog):
     """
     Modern Windows 11 Fluent Settings Dialog.
     Allows user to customize widget mode, scale, colors, hold-to-drag, network adapter, refresh rate, and autostart.
+    Also provides comprehensive Internet Traffic History & Analytics visualizations.
     """
     settings_changed = Signal()
     snap_requested = Signal()
     dock_taskbar_requested = Signal(bool)
 
-    def __init__(self, config_manager: ConfigManager = None, parent=None):
+    def __init__(self, config_manager: ConfigManager = None, traffic_history: TrafficHistory = None, parent=None):
         super().__init__(parent)
         self.config = config_manager or ConfigManager()
+        self.traffic_history = traffic_history or TrafficHistory()
 
-        self.setWindowTitle("Pengaturan — Modern Speed Meter")
-        self.setFixedSize(560, 530)
+        self.setWindowTitle("Pengaturan & Riwayat — Modern Speed Meter")
+        self.resize(710, 640)
+        self.setMinimumSize(680, 580)
         self.setStyleSheet(styles.get_settings_dialog_style())
 
         self._setup_ui()
@@ -46,9 +51,11 @@ class SettingsDialog(QDialog):
         # Tab Widget
         self.tabs = QTabWidget(self)
         self.tabs.addTab(self._build_general_tab(), "Umum")
-        self.tabs.addTab(self._build_appearance_tab(), "Tampilan & Ukuran")
+        self.tabs.addTab(self._build_appearance_tab(), "Tampilan && Ukuran")
+        self.tabs.addTab(self._build_history_tab(), "Riwayat && Statistik")
         self.tabs.addTab(self._build_network_tab(), "Jaringan")
-        self.tabs.addTab(self._build_startup_tab(), "Startup & Info Dev")
+        self.tabs.addTab(self._build_startup_tab(), "Startup && Dev")
+        self.tabs.currentChanged.connect(self._on_tab_changed)
         main_layout.addWidget(self.tabs)
 
         # Footer Action Buttons
@@ -65,7 +72,7 @@ class SettingsDialog(QDialog):
         self.btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(self.btn_cancel)
 
-        self.btn_apply = QPushButton("Terapkan & Simpan", self)
+        self.btn_apply = QPushButton("Terapkan && Simpan", self)
         self.btn_apply.setObjectName("PrimaryButton")
         self.btn_apply.clicked.connect(self._save_and_apply)
         btn_layout.addWidget(self.btn_apply)
@@ -272,6 +279,200 @@ class SettingsDialog(QDialog):
         layout.addStretch()
         return tab
 
+    def _build_history_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(6, 8, 6, 6)
+        layout.setSpacing(10)
+
+        # 1. Period Selector & Action Buttons Bar
+        row_filter = QHBoxLayout()
+        row_filter.setSpacing(8)
+
+        lbl_period = QLabel("Periode:", tab)
+        lbl_period.setStyleSheet("color: #94A3B8; font-weight: 600; font-size: 9pt;")
+        row_filter.addWidget(lbl_period)
+
+        self.combo_history_period = QComboBox(tab)
+        self.combo_history_period.addItem("Hari Ini (24 Jam)", "today")
+        self.combo_history_period.addItem("7 Hari Terakhir (Seminggu)", "week")
+        self.combo_history_period.addItem("30 Hari Terakhir (Sebulan)", "month")
+        self.combo_history_period.addItem("Pilih Bulan Tertentu...", "custom")
+        self.combo_history_period.currentIndexChanged.connect(self._on_history_period_changed)
+        row_filter.addWidget(self.combo_history_period)
+
+        self.combo_custom_month = QComboBox(tab)
+        self.combo_custom_month.setVisible(False)
+        self.combo_custom_month.currentIndexChanged.connect(self._load_history_data)
+        row_filter.addWidget(self.combo_custom_month)
+
+        row_filter.addStretch()
+
+        self.btn_refresh_history = QPushButton("Segarkan", tab)
+        self.btn_refresh_history.setToolTip("Perbarui data riwayat penggunaan jaringan")
+        self.btn_refresh_history.clicked.connect(self._load_history_data)
+        row_filter.addWidget(self.btn_refresh_history)
+
+        self.btn_clear_history = QPushButton("Bersihkan", tab)
+        self.btn_clear_history.setToolTip("Hapus seluruh catatan riwayat traffic")
+        self.btn_clear_history.setStyleSheet("color: #F87171; border-color: rgba(239, 68, 68, 0.3);")
+        self.btn_clear_history.clicked.connect(self._clear_history_data)
+        row_filter.addWidget(self.btn_clear_history)
+
+        layout.addLayout(row_filter)
+
+        # 2. KPI Metric Cards Row
+        row_kpis = QHBoxLayout()
+        row_kpis.setSpacing(8)
+
+        def make_kpi_card(title: str, default_val: str, accent_color: str):
+            card = QFrame(tab)
+            card.setStyleSheet("""
+                QFrame {
+                    background-color: #171B24;
+                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    border-radius: 8px;
+                }
+            """)
+            c_layout = QVBoxLayout(card)
+            c_layout.setContentsMargins(10, 8, 10, 8)
+            c_layout.setSpacing(3)
+
+            lbl_t = QLabel(title, card)
+            lbl_t.setStyleSheet("color: #94A3B8; font-size: 7.5pt; font-weight: 600; text-transform: uppercase; background: transparent;")
+            c_layout.addWidget(lbl_t)
+
+            lbl_v = QLabel(default_val, card)
+            lbl_v.setStyleSheet(f"color: {accent_color}; font-size: 11.5pt; font-weight: 700; background: transparent;")
+            c_layout.addWidget(lbl_v)
+
+            return card, lbl_v
+
+        self.card_down, self.lbl_kpi_down = make_kpi_card("TOTAL DOWNLOAD", "0.00 B", self.down_color if hasattr(self, "down_color") else "#00E5FF")
+        self.card_up, self.lbl_kpi_up = make_kpi_card("TOTAL UPLOAD", "0.00 B", self.up_color if hasattr(self, "up_color") else "#00E676")
+        self.card_total, self.lbl_kpi_total = make_kpi_card("TOTAL KUOTA", "0.00 B", "#F8FAFC")
+        self.card_peak, self.lbl_kpi_peak = make_kpi_card("PUNCAK TRAFFIC", "0.00 B", "#38BDF8")
+
+        row_kpis.addWidget(self.card_down)
+        row_kpis.addWidget(self.card_up)
+        row_kpis.addWidget(self.card_total)
+        row_kpis.addWidget(self.card_peak)
+        layout.addLayout(row_kpis)
+
+        # 3. Interactive Chart
+        self.chart_widget = TrafficChartWidget(tab)
+        self.chart_widget.setMinimumHeight(180)
+        down_col = getattr(self, "down_color", "#00E5FF")
+        up_col = getattr(self, "up_color", "#00E676")
+        self.chart_widget.set_colors(down_col, up_col)
+        layout.addWidget(self.chart_widget)
+
+        # 4. Detailed Data Table
+        self.table_history = QTableWidget(tab)
+        self.table_history.setColumnCount(4)
+        self.table_history.setHorizontalHeaderLabels(["Waktu / Periode", "Download (▼)", "Upload (▲)", "Total"])
+        self.table_history.verticalHeader().setVisible(False)
+        self.table_history.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table_history.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table_history.setAlternatingRowColors(True)
+        self.table_history.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table_history.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_history.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_history.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_history.setMinimumHeight(130)
+        layout.addWidget(self.table_history)
+
+        return tab
+
+    def _on_tab_changed(self, index: int):
+        if "Riwayat" in self.tabs.tabText(index):
+            self._load_history_data()
+
+    def _on_history_period_changed(self):
+        period = self.combo_history_period.currentData()
+        self.combo_custom_month.setVisible(period == "custom")
+        self._load_history_data()
+
+    def _populate_available_months(self):
+        self.combo_custom_month.blockSignals(True)
+        self.combo_custom_month.clear()
+        months = self.traffic_history.get_available_months()
+        for ym, label in months:
+            self.combo_custom_month.addItem(label, ym)
+        self.combo_custom_month.blockSignals(False)
+
+    def _load_history_data(self):
+        if not hasattr(self, "chart_widget") or not hasattr(self, "table_history"):
+            return
+
+        period = self.combo_history_period.currentData()
+        records = []
+        if period == "today":
+            records = self.traffic_history.get_today_hourly()
+        elif period == "week":
+            records = self.traffic_history.get_last_7_days()
+        elif period == "month":
+            records = self.traffic_history.get_last_30_days()
+        elif period == "custom":
+            ym = self.combo_custom_month.currentData()
+            if ym and "-" in ym:
+                try:
+                    y, m = map(int, ym.split("-"))
+                    records = self.traffic_history.get_custom_month(y, m)
+                except Exception:
+                    records = []
+            else:
+                records = []
+
+        summary = self.traffic_history.get_summary(records)
+
+        # Update KPI cards
+        self.lbl_kpi_down.setText(TrafficHistory.format_bytes(summary["total_recv"]))
+        self.lbl_kpi_up.setText(TrafficHistory.format_bytes(summary["total_sent"]))
+        self.lbl_kpi_total.setText(TrafficHistory.format_bytes(summary["total_bytes"]))
+        self.lbl_kpi_peak.setText(TrafficHistory.format_bytes(summary["peak_bytes"]))
+
+        # Update Chart
+        down_col = getattr(self, "down_color", "#00E5FF")
+        up_col = getattr(self, "up_color", "#00E676")
+        self.chart_widget.set_colors(down_col, up_col)
+        self.chart_widget.set_data(records)
+
+        # Update Table
+        self.table_history.setRowCount(len(records))
+        for row, item in enumerate(records):
+            time_item = QTableWidgetItem(str(item.get("label", "")))
+            time_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+            down_item = QTableWidgetItem(TrafficHistory.format_bytes(item.get("bytes_recv", 0)))
+            down_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            down_item.setForeground(QColor(down_col))
+
+            up_item = QTableWidgetItem(TrafficHistory.format_bytes(item.get("bytes_sent", 0)))
+            up_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            up_item.setForeground(QColor(up_col))
+
+            total_item = QTableWidgetItem(TrafficHistory.format_bytes(item.get("total_bytes", 0)))
+            total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            total_item.setForeground(QColor("#F8FAFC"))
+
+            self.table_history.setItem(row, 0, time_item)
+            self.table_history.setItem(row, 1, down_item)
+            self.table_history.setItem(row, 2, up_item)
+            self.table_history.setItem(row, 3, total_item)
+
+    def _clear_history_data(self):
+        reply = QMessageBox.question(
+            self,
+            "Konfirmasi Hapus Riwayat",
+            "Apakah Anda yakin ingin menghapus seluruh catatan riwayat traffic internet?\nSemua statistik akan di-reset.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.traffic_history.clear_history()
+            self._populate_available_months()
+            self._load_history_data()
+
     def _build_startup_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
@@ -377,6 +578,10 @@ class SettingsDialog(QDialog):
         is_startup = is_windows_autostart_enabled("ModernSpeedMeter")
         self.chk_startup.setChecked(is_startup)
 
+        # History
+        self._populate_available_months()
+        self._load_history_data()
+
     def _update_color_button_styles(self):
         self.btn_up_color.setStyleSheet(f"background-color: {self.up_color}; color: #000; font-weight: bold; border-radius: 6px; padding: 6px;")
         self.btn_down_color.setStyleSheet(f"background-color: {self.down_color}; color: #000; font-weight: bold; border-radius: 6px; padding: 6px;")
@@ -386,12 +591,20 @@ class SettingsDialog(QDialog):
         if col.isValid():
             self.up_color = col.name()
             self._update_color_button_styles()
+            if hasattr(self, "lbl_kpi_up"):
+                self.lbl_kpi_up.setStyleSheet(f"color: {self.up_color}; font-size: 11.5pt; font-weight: 700; background: transparent;")
+            if hasattr(self, "chart_widget"):
+                self.chart_widget.set_colors(self.down_color, self.up_color)
 
     def _pick_down_color(self):
         col = QColorDialog.getColor(self.down_color, self, "Pilih Warna Indikator Download")
         if col.isValid():
             self.down_color = col.name()
             self._update_color_button_styles()
+            if hasattr(self, "lbl_kpi_down"):
+                self.lbl_kpi_down.setStyleSheet(f"color: {self.down_color}; font-size: 11.5pt; font-weight: 700; background: transparent;")
+            if hasattr(self, "chart_widget"):
+                self.chart_widget.set_colors(self.down_color, self.up_color)
 
     def _reset_defaults(self):
         reply = QMessageBox.question(
@@ -413,6 +626,12 @@ class SettingsDialog(QDialog):
             self.up_color = "#00E676"
             self.down_color = "#00E5FF"
             self._update_color_button_styles()
+            if hasattr(self, "lbl_kpi_down"):
+                self.lbl_kpi_down.setStyleSheet("color: #00E5FF; font-size: 11.5pt; font-weight: 700; background: transparent;")
+            if hasattr(self, "lbl_kpi_up"):
+                self.lbl_kpi_up.setStyleSheet("color: #00E676; font-size: 11.5pt; font-weight: 700; background: transparent;")
+            if hasattr(self, "chart_widget"):
+                self.chart_widget.set_colors("#00E5FF", "#00E676")
             self.slider_opacity.setValue(92)
             if hasattr(self, "_update_opacity_label"):
                 self._update_opacity_label(92)

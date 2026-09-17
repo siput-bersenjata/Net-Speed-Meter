@@ -373,4 +373,26 @@ def get_settings_dialog_style() -> str:
         background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2563EB, stop:0.5 #0EA5E9, stop:1 #22D3EE);
         border: 1px solid #7DD3FC;
     }
+    QTableWidget {
+        background-color: #141822;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        gridline-color: rgba(255, 255, 255, 0.04);
+        color: #F8FAFC;
+        font-size: 8.5pt;
+        selection-background-color: rgba(56, 189, 248, 0.22);
+    }
+    QHeaderView::section {
+        background-color: #1D222E;
+        color: #94A3B8;
+        font-weight: 700;
+        font-size: 8.5pt;
+        border: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+        padding: 5px 8px;
+    }
+    QTableWidget::item {
+        padding: 4px 8px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
     """
