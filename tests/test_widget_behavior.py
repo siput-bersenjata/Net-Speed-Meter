@@ -68,5 +68,22 @@ class TestWidgetBehavior(unittest.TestCase):
         self.assertIn("9.8 MB", widget.session_label.text())
         self.assertIn("326.3 KB", widget.session_label.text())
 
+    def test_mode_switching_from_docked_taskbar(self):
+        widget = SpeedMeterWidget(config_manager=self.config)
+        # Dock to taskbar
+        widget.dock_to_taskbar(True)
+        self.assertEqual(widget.mode, "taskbar")
+        self.assertTrue(self.config.get("is_taskbar_docked"))
+
+        # User selects card mode in settings
+        widget.set_mode("card")
+        self.assertEqual(widget.mode, "card")
+        self.assertFalse(self.config.get("is_taskbar_docked"))
+
+        # User selects capsule mode in settings
+        widget.set_mode("capsule")
+        self.assertEqual(widget.mode, "capsule")
+        self.assertFalse(self.config.get("is_taskbar_docked"))
+
 if __name__ == "__main__":
     unittest.main()

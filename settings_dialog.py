@@ -30,6 +30,8 @@ class SettingsDialog(QDialog):
     settings_changed = Signal()
     snap_requested = Signal()
     dock_taskbar_requested = Signal(bool)
+    mode_preview_requested = Signal(str)
+    shape_preview_requested = Signal(str)
 
     def __init__(self, config_manager: ConfigManager = None, traffic_history: TrafficHistory = None, parent=None):
         super().__init__(parent)
@@ -92,6 +94,7 @@ class SettingsDialog(QDialog):
         self.combo_mode.addItem("Capsule Pill (Kapsul Modern Melayang)", "capsule")
         self.combo_mode.addItem("Taskbar Docked (Menyatu di Taskbar Samping Wi-Fi)", "taskbar")
         self.combo_mode.addItem("Floating Glass Card (Kartu Detail + Grafik)", "card")
+        self.combo_mode.currentIndexChanged.connect(self._on_mode_combo_changed)
         v_mode.addWidget(self.combo_mode)
 
         lbl_mode_hint = QLabel("Pilih 'Taskbar Docked' untuk memasukkan widget langsung ke dalam bilah taskbar Windows di samping ikon Wi-Fi & Baterai.", grp_mode)
@@ -239,6 +242,7 @@ class SettingsDialog(QDialog):
         self.combo_shape.addItem("🔘 Badge Melengkung (Curved Oval Badge)", "badge")
         self.combo_shape.addItem("🫧 Melengkung Modern (Soft Rounded 12px)", "rounded")
         self.combo_shape.addItem("✨ Hanya Tulisan (Clean Text Only — Tanpa Kotak Background)", "text_only")
+        self.combo_shape.currentIndexChanged.connect(self._on_shape_combo_changed)
         v_shape.addWidget(self.combo_shape)
 
         lbl_shape_hint = QLabel(
@@ -606,15 +610,19 @@ class SettingsDialog(QDialog):
     def _load_values(self):
         # Mode
         mode = self.config.get("widget_mode", "capsule")
+        self.combo_mode.blockSignals(True)
         idx = self.combo_mode.findData(mode)
         if idx >= 0:
             self.combo_mode.setCurrentIndex(idx)
+        self.combo_mode.blockSignals(False)
 
         # Shape template
         cur_shape = self.config.get("shape_template", "pill")
+        self.combo_shape.blockSignals(True)
         s_idx = self.combo_shape.findData(cur_shape)
         if s_idx >= 0:
             self.combo_shape.setCurrentIndex(s_idx)
+        self.combo_shape.blockSignals(False)
 
         # Always on top, Lock, Hold to drag, Click-through
         self.chk_ontop.setChecked(self.config.get("always_on_top", True))
@@ -731,12 +739,32 @@ class SettingsDialog(QDialog):
         self.settings_changed.emit()
         self.accept()
 
+    def _on_mode_combo_changed(self, idx: int):
+        mode = self.combo_mode.itemData(idx)
+        if mode:
+            self.mode_preview_requested.emit(mode)
+
+    def _on_shape_combo_changed(self, idx: int):
+        shape = self.combo_shape.itemData(idx)
+        if shape:
+            self.shape_preview_requested.emit(shape)
+
+    def reject(self):
+        # Revert any unapplied live previews back to saved config
+        orig_mode = self.config.get("widget_mode", "capsule")
+        orig_shape = self.config.get("shape_template", "pill")
+        self.mode_preview_requested.emit(orig_mode)
+        self.shape_preview_requested.emit(orig_shape)
+        super().reject()
+
     def _save_and_apply(self):
         mode = self.combo_mode.currentData()
         self.config.set("widget_mode", mode, auto_save=False)
         self.config.set("shape_template", self.combo_shape.currentData(), auto_save=False)
         if mode == "taskbar":
             self.config.set("is_taskbar_docked", True, auto_save=False)
+        else:
+            self.config.set("is_taskbar_docked", False, auto_save=False)
         self.config.set("always_on_top", self.chk_ontop.isChecked(), auto_save=False)
         self.config.set("locked_position", self.chk_locked.isChecked(), auto_save=False)
         self.config.set("hold_to_drag", self.chk_hold_to_drag.isChecked(), auto_save=False)

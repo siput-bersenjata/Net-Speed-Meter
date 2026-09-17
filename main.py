@@ -194,13 +194,15 @@ def main():
             settings_dialog = SettingsDialog(config_manager=config, traffic_history=history, parent=None)
             settings_dialog.dock_taskbar_requested.connect(widget.dock_to_taskbar)
             settings_dialog.snap_requested.connect(widget.snap_to_taskbar)
+            settings_dialog.mode_preview_requested.connect(widget.set_mode)
+            settings_dialog.shape_preview_requested.connect(widget.set_shape_template)
 
             def on_settings_applied():
                 new_mode = config.get("widget_mode", "capsule")
                 new_shape = config.get("shape_template", "pill")
                 new_click_through = bool(config.get("click_through", False))
 
-                if new_mode == "taskbar" or config.get("is_taskbar_docked", False):
+                if new_mode == "taskbar":
                     widget.dock_to_taskbar(True)
                 else:
                     widget.set_mode(new_mode)

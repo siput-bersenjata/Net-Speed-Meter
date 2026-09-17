@@ -377,13 +377,25 @@ class SpeedMeterWidget(QWidget):
             mode = "capsule"
         mode_changed = (self.mode != mode)
         self.mode = mode
-        self.config.set("widget_mode", mode)
+        self.config.set("widget_mode", mode, auto_save=False)
+        if mode == "taskbar":
+            self.config.set("is_taskbar_docked", True, auto_save=False)
+        else:
+            self.config.set("is_taskbar_docked", False, auto_save=False)
+
         if mode_changed:
             self._setup_ui()
         self.apply_theme()
         self.update_stats(self.current_up, self.current_down, self.current_total_sent, self.current_total_recv, self.current_ping)
-        if mode == "taskbar" and self.config.get("is_taskbar_docked", False):
+
+        if mode == "taskbar":
             self.dock_to_taskbar(True)
+        else:
+            self.adjustSize()
+            screen = self.screen() or QGuiApplication.primaryScreen()
+            avail = screen.availableGeometry() if screen else None
+            if avail and (self.y() + self.height() > avail.bottom()):
+                self.move(self.x(), max(avail.top() + 10, avail.bottom() - self.height() - 20))
 
     def dock_to_taskbar(self, enable: bool = True):
         """
