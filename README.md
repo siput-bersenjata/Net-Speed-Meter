@@ -30,7 +30,7 @@ A sleek, lightweight, and modern real-time internet speed monitor & data usage a
 
 ### ⚙️ Pengaturan Tampilan, Bentuk & Perilaku Window
 
-| Tab Tampilan & Ukuran (Shape & Opacity 0%) | Tab Umum (Mode Layout & Click-Through) |
+| Tab Tampilan & Ukuran (Shape & Opacity 0%) | Tab Umum (Mode Layout & Riwayat Cepat) |
 | :---: | :---: |
 | <img src="assets/settings_appearance.png" width="350" alt="Pengaturan Tampilan & Ukuran"> | <img src="assets/settings_general.png" width="350" alt="Pengaturan Umum"> |
 
@@ -39,6 +39,7 @@ A sleek, lightweight, and modern real-time internet speed monitor & data usage a
 ## 🌟 Fitur Unggulan (Key Features)
 
 ### 1. 📊 Riwayat & Statistik Penggunaan Kuota (Traffic History & Analytics)
+- **Ringkasan Langsung di Tab Umum**: Kartu rekapitulasi cepat pemakaian Hari Ini dan Bulan Ini langsung terpampang di tab pertama (Umum) lengkap dengan tombol akses cepat menuju grafik interaktif.
 - **Penyimpanan Lokal Persisten**: Otomatis merekam dan menjumlahkan penggunaan download & upload per jam ke database lokal SQLite (`~/.speed_meter/traffic_history.db`).
 - **4 Rentang Periode Analisis**:
   - 🕒 **Hari Ini (24 Jam)**: Rincian penggunaan data per jam (00:00 s/d 23:00).

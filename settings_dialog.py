@@ -1,4 +1,5 @@
 import sys
+import datetime
 import webbrowser
 from PySide6.QtCore import Qt, Signal, QUrl
 from PySide6.QtGui import QDesktopServices, QColor
@@ -36,8 +37,8 @@ class SettingsDialog(QDialog):
         self.traffic_history = traffic_history or TrafficHistory()
 
         self.setWindowTitle("Pengaturan & Riwayat — Modern Speed Meter")
-        self.resize(710, 640)
-        self.setMinimumSize(680, 580)
+        self.resize(720, 730)
+        self.setMinimumSize(680, 680)
         self.setStyleSheet(styles.get_settings_dialog_style())
 
         self._setup_ui()
@@ -45,8 +46,8 @@ class SettingsDialog(QDialog):
 
     def _setup_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(18, 18, 18, 18)
-        main_layout.setSpacing(14)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setSpacing(12)
 
         # Tab Widget
         self.tabs = QTabWidget(self)
@@ -82,7 +83,7 @@ class SettingsDialog(QDialog):
     def _build_general_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setSpacing(14)
+        layout.setSpacing(12)
 
         # Mode Selection
         grp_mode = QGroupBox("Gaya Tampilan Widget (Layout Mode)", tab)
@@ -100,7 +101,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(grp_mode)
 
         # Behavior Group
-        grp_behav = QGroupBox("Perilaku Jendela & Posisi Taskbar", tab)
+        grp_behav = QGroupBox("Perilaku Jendela && Posisi Taskbar", tab)
         v_behav = QVBoxLayout(grp_behav)
         self.chk_ontop = QCheckBox("Selalu di Atas (Always on Top)", grp_behav)
         self.chk_locked = QCheckBox("Kunci Posisi Sepenuhnya (Disable Drag)", grp_behav)
@@ -123,11 +124,13 @@ class SettingsDialog(QDialog):
         row_quick = QHBoxLayout()
         row_quick.setSpacing(8)
 
-        self.btn_dock_taskbar = QPushButton("📌 Masuk ke Dalam Taskbar", grp_behav)
+        self.btn_dock_taskbar = QPushButton("Masuk ke Dalam Taskbar", grp_behav)
         self.btn_dock_taskbar.setObjectName("PrimaryButton")
+        self.btn_dock_taskbar.setMinimumHeight(32)
         self.btn_dock_taskbar.clicked.connect(self._dock_now)
 
-        self.btn_snap_now = QPushButton("⚡ Snap Samping Wi-Fi", grp_behav)
+        self.btn_snap_now = QPushButton("Snap Samping Wi-Fi", grp_behav)
+        self.btn_snap_now.setMinimumHeight(32)
         self.btn_snap_now.clicked.connect(lambda: self.snap_requested.emit())
 
         row_quick.addWidget(self.btn_dock_taskbar)
@@ -141,6 +144,58 @@ class SettingsDialog(QDialog):
         v_behav.addWidget(lbl_click_hint)
         v_behav.addLayout(row_quick)
         layout.addWidget(grp_behav)
+
+        # Quick Data Usage Summary Group directly on Umum tab
+        grp_hist = QGroupBox("Riwayat Penggunaan Data Jaringan (Data Usage)", tab)
+        v_hist = QVBoxLayout(grp_hist)
+        v_hist.setSpacing(8)
+
+        row_stats = QHBoxLayout()
+        row_stats.setSpacing(8)
+
+        # Hari Ini Card
+        box_today = QFrame(grp_hist)
+        box_today.setStyleSheet("background-color: #171B24; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px;")
+        v_today = QVBoxLayout(box_today)
+        v_today.setContentsMargins(10, 8, 10, 8)
+        v_today.setSpacing(2)
+        lbl_t_title = QLabel("HARI INI (TODAY)", box_today)
+        lbl_t_title.setStyleSheet("color: #94A3B8; font-size: 7.5pt; font-weight: 600; text-transform: uppercase; background: transparent;")
+        self.lbl_general_today_val = QLabel("0.00 B", box_today)
+        self.lbl_general_today_val.setStyleSheet("color: #00E5FF; font-size: 11.5pt; font-weight: 700; background: transparent;")
+        self.lbl_general_today_sub = QLabel("▼ 0 B  •  ▲ 0 B", box_today)
+        self.lbl_general_today_sub.setStyleSheet("color: #94A3B8; font-size: 8pt; background: transparent;")
+        v_today.addWidget(lbl_t_title)
+        v_today.addWidget(self.lbl_general_today_val)
+        v_today.addWidget(self.lbl_general_today_sub)
+        row_stats.addWidget(box_today)
+
+        # Bulan Ini Card
+        box_month = QFrame(grp_hist)
+        box_month.setStyleSheet("background-color: #171B24; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px;")
+        v_month = QVBoxLayout(box_month)
+        v_month.setContentsMargins(10, 8, 10, 8)
+        v_month.setSpacing(2)
+        lbl_m_title = QLabel("BULAN INI (THIS MONTH)", box_month)
+        lbl_m_title.setStyleSheet("color: #94A3B8; font-size: 7.5pt; font-weight: 600; text-transform: uppercase; background: transparent;")
+        self.lbl_general_month_val = QLabel("0.00 B", box_month)
+        self.lbl_general_month_val.setStyleSheet("color: #00E676; font-size: 11.5pt; font-weight: 700; background: transparent;")
+        self.lbl_general_month_sub = QLabel("▼ 0 B  •  ▲ 0 B", box_month)
+        self.lbl_general_month_sub.setStyleSheet("color: #94A3B8; font-size: 8pt; background: transparent;")
+        v_month.addWidget(lbl_m_title)
+        v_month.addWidget(self.lbl_general_month_val)
+        v_month.addWidget(self.lbl_general_month_sub)
+        row_stats.addWidget(box_month)
+
+        v_hist.addLayout(row_stats)
+
+        self.btn_goto_history = QPushButton("Lihat Grafik Lengkap && Rincian Riwayat ↗", grp_hist)
+        self.btn_goto_history.setObjectName("PrimaryButton")
+        self.btn_goto_history.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_goto_history.clicked.connect(self._goto_history_tab)
+        v_hist.addWidget(self.btn_goto_history)
+
+        layout.addWidget(grp_hist)
 
         layout.addStretch()
         return tab
@@ -460,6 +515,30 @@ class SettingsDialog(QDialog):
             self.table_history.setItem(row, 1, down_item)
             self.table_history.setItem(row, 2, up_item)
             self.table_history.setItem(row, 3, total_item)
+
+        # Update General Tab quick usage summary cards if present
+        if hasattr(self, "lbl_general_today_val"):
+            today_recs = self.traffic_history.get_today_hourly()
+            today_s = self.traffic_history.get_summary(today_recs)
+            self.lbl_general_today_val.setText(TrafficHistory.format_bytes(today_s["total_bytes"]))
+            self.lbl_general_today_sub.setText(
+                f"▼ {TrafficHistory.format_bytes(today_s['total_recv'])}  •  ▲ {TrafficHistory.format_bytes(today_s['total_sent'])}"
+            )
+
+        if hasattr(self, "lbl_general_month_val"):
+            now = datetime.date.today()
+            month_recs = self.traffic_history.get_custom_month(now.year, now.month)
+            month_s = self.traffic_history.get_summary(month_recs)
+            self.lbl_general_month_val.setText(TrafficHistory.format_bytes(month_s["total_bytes"]))
+            self.lbl_general_month_sub.setText(
+                f"▼ {TrafficHistory.format_bytes(month_s['total_recv'])}  •  ▲ {TrafficHistory.format_bytes(month_s['total_sent'])}"
+            )
+
+    def _goto_history_tab(self):
+        for i in range(self.tabs.count()):
+            if "Riwayat" in self.tabs.tabText(i):
+                self.tabs.setCurrentIndex(i)
+                break
 
     def _clear_history_data(self):
         reply = QMessageBox.question(
